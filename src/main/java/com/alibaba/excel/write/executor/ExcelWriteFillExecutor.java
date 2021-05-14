@@ -192,9 +192,6 @@ public class ExcelWriteFillExecutor extends AbstractExcelWriteExecutor {
             Cell cell = getOneCell(analysisCell, fillConfig);
             if (analysisCell.getOnlyOneVariable()) {
                 String variable = analysisCell.getVariableList().get(0);
-                if (writeContext.currentWriteHolder().ignore(variable, analysisCell.getColumnIndex())) {
-                    continue;
-                }
                 if (!dataMap.containsKey(variable)) {
                     continue;
                 }
@@ -208,9 +205,6 @@ public class ExcelWriteFillExecutor extends AbstractExcelWriteExecutor {
                 List<CellData> cellDataList = new ArrayList<CellData>();
                 for (String variable : analysisCell.getVariableList()) {
                     cellValueBuild.append(analysisCell.getPrepareDataList().get(index++));
-                    if (writeContext.currentWriteHolder().ignore(variable, analysisCell.getColumnIndex())) {
-                        continue;
-                    }
                     if (!dataMap.containsKey(variable)) {
                         continue;
                     }
@@ -295,28 +289,9 @@ public class ExcelWriteFillExecutor extends AbstractExcelWriteExecutor {
             default:
                 throw new ExcelGenerateException("The wrong direction.");
         }
-        Row row = sheet.getRow(lastRowIndex);
-        if (row == null) {
-            row = cachedSheet.getRow(lastRowIndex);
-            if (row == null) {
-                WriteHandlerUtils.beforeRowCreate(writeContext, lastRowIndex, null, Boolean.FALSE);
-                if (fillConfig.getForceNewRow()) {
-                    row = cachedSheet.createRow(lastRowIndex);
-                } else {
-                    row = sheet.createRow(lastRowIndex);
-                }
-                checkRowHeight(analysisCell, fillConfig, isOriginalCell, row);
-                WriteHandlerUtils.afterRowCreate(writeContext, row, null, Boolean.FALSE);
-            } else {
-                checkRowHeight(analysisCell, fillConfig, isOriginalCell, row);
-            }
-        }
-        Cell cell = row.getCell(lastColumnIndex);
-        if (cell == null) {
-            WriteHandlerUtils.beforeCellCreate(writeContext, row, null, lastColumnIndex, null, Boolean.FALSE);
-            cell = row.createCell(lastColumnIndex);
-            WriteHandlerUtils.afterCellCreate(writeContext, cell, null, null, Boolean.FALSE);
-        }
+
+        Row row = createRowIfNecessary(sheet, cachedSheet, lastRowIndex, fillConfig, analysisCell, isOriginalCell);
+        Cell cell = createCellIfNecessary(row,lastColumnIndex);
 
         Map<AnalysisCell, CellStyle> collectionFieldStyleMap = collectionFieldStyleCache.get(currentUniqueDataFlag);
         if (collectionFieldStyleMap == null) {
@@ -332,6 +307,45 @@ public class ExcelWriteFillExecutor extends AbstractExcelWriteExecutor {
             }
         }
         return cell;
+    }
+
+    private Cell createCellIfNecessary(Row row, Integer lastColumnIndex) {
+        Cell cell = row.getCell(lastColumnIndex);
+        if (cell != null) {
+            return cell;
+        }
+        WriteHandlerUtils.beforeCellCreate(writeContext, row, null, lastColumnIndex, null, Boolean.FALSE);
+        cell = row.createCell(lastColumnIndex);
+        WriteHandlerUtils.afterCellCreate(writeContext, cell, null, null, Boolean.FALSE);
+        return cell;
+    }
+
+    private Row createRowIfNecessary(Sheet sheet, Sheet cachedSheet, Integer lastRowIndex, FillConfig fillConfig,
+        AnalysisCell analysisCell, boolean isOriginalCell) {
+        Row row = sheet.getRow(lastRowIndex);
+        if (row != null) {
+            return row;
+        }
+        row = cachedSheet.getRow(lastRowIndex);
+        if (row == null) {
+            WriteHandlerUtils.beforeRowCreate(writeContext, lastRowIndex, null, Boolean.FALSE);
+            if (fillConfig.getForceNewRow()) {
+                row = cachedSheet.createRow(lastRowIndex);
+            } else {
+                // The last row of the middle disk inside empty rows, resulting in cachedSheet can not get inside.
+                // Will throw Attempting to write a row[" + rownum + "] " + "in the range [0," + this._sh.getLastRowNum() + "] that is already written to disk.
+                try {
+                    row = sheet.createRow(lastRowIndex);
+                } catch (IllegalArgumentException ignore) {
+                    row = cachedSheet.createRow(lastRowIndex);
+                }
+            }
+            checkRowHeight(analysisCell, fillConfig, isOriginalCell, row);
+            WriteHandlerUtils.afterRowCreate(writeContext, row, null, Boolean.FALSE);
+        } else {
+            checkRowHeight(analysisCell, fillConfig, isOriginalCell, row);
+        }
+        return row;
     }
 
     private void checkRowHeight(AnalysisCell analysisCell, FillConfig fillConfig, boolean isOriginalCell, Row row) {
